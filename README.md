@@ -1,0 +1,6 @@
+To run simulation
+ros2 launch celda_control iniciar_robot.launch.py use_fake_hardware:=true launch_rviz:=false
+ros2 launch celda_moveit_config move_group.launch.py
+ros2 launch celda_moveit_config moveit_rviz.launch.py
+To run pick and place code
+ros2 launch ur3e_pick_and_place celda_pick_and_place.launch.py

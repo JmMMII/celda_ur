@@ -1,0 +1,147 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find onrobot_description)/urdf/onrobot_macro.xacro"/>
+  <xacro:macro name="robot_celda" params="
+    parent
+    *origin
+    ur_type
+    joint_limits_parameters_file
+    kinematics_parameters_file
+    physical_parameters_file
+    visual_parameters_file
+    ">
+
+    <joint name="table_base_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}" />
+      <child link="table" />
+    </joint>
+
+    <link name="table">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 -0.025"/>
+        <geometry>
+          <box size="1 0.8 0.05"/>  <!-- Largo (x), ancho (y), alto (z) 0.75 0.5 -1-->
+        </geometry>
+        <material name="Gray">
+          <color rgba="0.5 0.5 0.5 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin rpy="0 0 0" xyz="0 0 -0.025"/>
+        <geometry>
+          <box size="1 0.8 0.05"/>
+        </geometry>
+      </collision>
+<!--       <inertial>
+        <mass value="10.0"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+      </inertial> -->
+    </link>
+
+    <joint name="wall_base_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}" />
+      <child link="wall" />
+    </joint>
+
+    <link name="wall">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0.5 1"/>
+        <geometry>
+          <box size="2 0.05 2"/>
+        </geometry>
+        <material name="Gray">
+          <color rgba="0.5 0.5 0.5 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin rpy="0 0 0" xyz="0 0.5 1"/>
+        <geometry>
+          <box size="2 0.05 2"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <link name="robot_mount"/>
+    <joint name="base_to_robot_mount" type="fixed">
+      <parent link="table"/>
+      <child link="robot_mount"/>
+      <origin xyz="0 0 0" rpy="0 0 ${pi}" />
+    </joint>
+
+    <!--This will create the specific robot-->
+    <xacro:ur_robot
+      name="${ur_type}"
+      tf_prefix="${ur_type}_"
+      parent="robot_mount"
+      joint_limits_parameters_file="${joint_limits_parameters_file}"
+      kinematics_parameters_file="${kinematics_parameters_file}"
+      physical_parameters_file="${physical_parameters_file}"
+      visual_parameters_file="${visual_parameters_file}"
+      generate_ros2_control_tag="false"
+    >
+      <origin xyz="0 0 0" rpy="0 0 0" />
+    </xacro:ur_robot>
+
+    <!-- Efector final simulado en tool0 -->
+    <!-- Ajustar más el cilindro para colisiones -->
+    <xacro:property name="gripper_len" value="0.21"/>
+    <link name="gripper">
+      <visual>
+        <geometry>
+          <cylinder radius="0.035" length="${gripper_len}"/>
+        </geometry>
+        <origin xyz="0 0 ${gripper_len/2}" rpy="0 0 0"/>
+        <material name="Gray">
+          <color rgba="0 0 1 1"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${gripper_len/2}" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="0.035" length="${gripper_len}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="gripper_tcp" type="fixed">
+      <parent link="ur3e_tool0"/>
+      <child link="gripper"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="gripper_tip" />
+
+    <joint name="gripper_to_tip" type="fixed">
+      <parent link="gripper"/>
+      <child link="gripper_tip"/>
+      <origin xyz="0 0 0.21" rpy="0 0 0"/>
+    </joint>
+
+    <!-- <link name="cable">
+      <collision>
+        <geometry>
+          <sphere radius="0.03"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </collision>
+    </link>
+    <joint name="cable_joint" type="fixed">
+      <parent link="ur3e_tool0"/>
+      <child link="cable"/>
+      <origin xyz="0 -0.035 0.01" rpy="0 0 0"/>
+    </joint> -->
+  
+  <!-- <xacro:onrobot onrobot_type="rg2" prefix=""/>
+
+  <joint name="onrobot_base_link_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="ur3e_tool0"/>
+    <child link="onrobot_base_link"/>
+  </joint> -->
+
+  </xacro:macro> 
+</robot>

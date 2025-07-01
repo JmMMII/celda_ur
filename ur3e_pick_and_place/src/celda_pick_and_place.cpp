@@ -117,7 +117,10 @@ int main(int argc, char** argv)
     // Crear interface para el grupo de planificación
     auto node = rclcpp::Node::make_shared("celda_move_to_pose", node_options);
     
-    // Crear un planning group con los 2 grupos para que al calcular la trayectoria también tenga en cuenta el eef ???
+    rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_pub = node->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", 1);
+
+    rclcpp::sleep_for(std::chrono::milliseconds(500));  // Espera a que se conecte el subscriber
+    
     static const std::string PLANNING_GROUP = "ur_arm";
     static const std::string GRIPPER_FRAME = "gripper_tip";
     moveit::planning_interface::MoveGroupInterface move_group(node, PLANNING_GROUP);
@@ -130,17 +133,17 @@ int main(int argc, char** argv)
     planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(node, "robot_description");
 
     // Evitar que se mueva joint_5
-    moveit_msgs::msg::JointConstraint joint5_constraint;
-    joint5_constraint.joint_name = "joint_5";
-    joint5_constraint.position = 0.0;
-    joint5_constraint.tolerance_above = 0.01;
-    joint5_constraint.tolerance_below = 0.01;
-    joint5_constraint.weight = 1.0;
+    // moveit_msgs::msg::JointConstraint joint5_constraint;
+    // joint5_constraint.joint_name = "joint_5";
+    // joint5_constraint.position = 0.0;
+    // joint5_constraint.tolerance_above = 0.01;
+    // joint5_constraint.tolerance_below = 0.01;
+    // joint5_constraint.weight = 1.0;
 
-    moveit_msgs::msg::Constraints constraints;
-    constraints.joint_constraints.push_back(joint5_constraint);
+    // moveit_msgs::msg::Constraints constraints;
+    // constraints.joint_constraints.push_back(joint5_constraint);
 
-    move_group.setPathConstraints(constraints);
+    // move_group.setPathConstraints(constraints);
 
     // Utilizo RRTstar para planificar 
     move_group.setPlannerId("RRTstar");
@@ -197,12 +200,6 @@ int main(int argc, char** argv)
     moveit_msgs::msg::PlanningScene planning_scene_msg;
     planning_scene->getPlanningSceneMsg(planning_scene_msg);
     planning_scene_msg.is_diff = true;
-    
-    ////////////////////////////////////// Lo podría poner al principio del programa
-    rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_pub = node->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", 1);
-
-    rclcpp::sleep_for(std::chrono::milliseconds(500));  // Espera a que se conecte el subscriber
-    //////////////////////////////////////
 
     planning_scene_pub->publish(planning_scene_msg);
 

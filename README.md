@@ -1,5 +1,4 @@
 1. **Run simulation (fake hardware):**
-   In different terminals
    ```bash
    ros2 launch celda_control iniciar_robot.launch.py use_fake_hardware:=true launch_rviz:=false
    ros2 launch celda_moveit_config move_group.launch.py

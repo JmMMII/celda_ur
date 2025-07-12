@@ -5,7 +5,7 @@
   <xacro:include filename="$(find celda_descripcion)/urdf/robot_celda_macro.xacro"/>
   <!--The ur_description package already provides a control tag for the UR arm, we can directly include-->
   <xacro:include filename="$(find ur_description)/urdf/ur.ros2_control.xacro"/>
-
+  
   <!--We need to specify the arguments used for parametrizing our description-->
   <!--Create a folder for wanted ur_type and copy those files from ur_description package in there; copied only ur20 files -->
   <!--You could as well point to ur_description but this way you make sure you use the same files as start_robot.launch.py which searches in runtime_config_package for joint_limits.yaml, physical_parameters.yaml, visual_parameters.yaml and in description_package for default_kinematics.yaml (last one can be overwritten)-->

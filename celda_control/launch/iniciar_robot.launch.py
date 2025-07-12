@@ -37,7 +37,7 @@ def generate_launch_description():
         )
     )
     declared_arguments.append(
-        DeclareLaunchArgument("launch_rviz", default_value="true", description="Launch RViz?")
+        DeclareLaunchArgument("launch_rviz", default_value="false", description="Launch RViz?")
     )
     declared_arguments.append(
         DeclareLaunchArgument(
@@ -108,6 +108,13 @@ def generate_launch_description():
             description="Enable headless mode for robot control",
         )
     )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "controllers_file",
+            default_value=PathJoinSubstitution([FindPackageShare("celda_control"), "config", "controlador_config.yaml"]),
+            description="YAML de ros2_control con tolerancias personalizadas",
+        )
+    )
 
     # initialize arguments
     ur_type = LaunchConfiguration("ur_type")
@@ -137,6 +144,7 @@ def generate_launch_description():
             "launch_rviz": launch_rviz,
             "use_fake_hardware": use_fake_hardware,
             "fake_sensor_commands": fake_sensor_commands,
+            "controllers_file": controllers_file,
             "description_package": description_package,
             "description_file": description_file,
             "kinematics_params_file": kinematics_params_file,

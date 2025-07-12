@@ -1,0 +1,63 @@
+# MoveIt uses this configuration for controller management
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - scaled_joint_trajectory_controller
+
+  scaled_joint_trajectory_controller:
+    type: FollowJointTrajectory
+    joints:
+      - ur3e_shoulder_pan_joint
+      - ur3e_shoulder_lift_joint
+      - ur3e_elbow_joint
+      - ur3e_wrist_1_joint
+      - ur3e_wrist_2_joint
+      - ur3e_wrist_3_joint
+    action_ns: follow_joint_trajectory
+    default: true
+
+# MoveIt uses this configuration for controller management
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - scaled_joint_trajectory_controller
+
+  scaled_joint_trajectory_controller:
+    type: joint_trajectory_controller/JointTrajectoryController
+    joints:
+      - ur3e_shoulder_pan_joint
+      - ur3e_shoulder_lift_joint
+      - ur3e_elbow_joint
+      - ur3e_wrist_1_joint
+      - ur3e_wrist_2_joint
+      - ur3e_wrist_3_joint
+    state_publish_rate: 50
+    action_monitor_rate: 20
+
+    constraints:
+      goal_time: 5.0
+      stopped_velocity_tolerance: 0.01
+      ur3e_shoulder_pan_joint:
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 0.5, velocity: 0.1}
+      ur3e_shoulder_lift_joint:
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 0.5, velocity: 0.1}
+      ur3e_elbow_joint:
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 0.5, velocity: 0.1}
+      ur3e_wrist_1_joint:
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 0.5, velocity: 0.1}
+      ur3e_wrist_2_joint:
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 0.5, velocity: 0.1}
+      ur3e_wrist_3_joint:  # joint_5
+        # Este es el joint problemático con rotaciones de ±2π.
+        # Damos margen amplio para evitar que falle por errores de 6.28 radianes.
+        trajectory: {position: 0.1, velocity: 0.1}
+        goal: {position: 6.4, velocity: 0.1}  # > 2π

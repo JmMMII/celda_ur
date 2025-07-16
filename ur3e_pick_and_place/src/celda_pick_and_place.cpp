@@ -15,13 +15,13 @@
 #include <moveit/robot_state/robot_state.h>
 // #include <trajectory_processing/iterative_parabolic_time_parameterization.h>
 
-
-void addObjeto(shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Pose pose)
+//En las funciones pasar directamente node para evitar tantos parámetros?
+void addObjeto(const std::string& id, shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Pose pose)
 {
   moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
   moveit_msgs::msg::CollisionObject objeto;
-  objeto.id = "pick_target";
+  objeto.id = id;
   objeto.header.frame_id = "world";
 
   // Asigna geometría y pose
@@ -37,9 +37,8 @@ void addObjeto(shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Po
   planning_scene_interface.applyCollisionObjects(objetos);
 }
 
-
 void gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std::string& comando) {
-    return;
+    // return;
     dashboard->commandLoadProgram(comando);
     dashboard->commandPlay();
     dashboard->commandLoadProgram("external_control.urp");
@@ -139,6 +138,164 @@ bool moverCart(moveit::planning_interface::MoveGroupInterface& move_group, const
     return false;
 }
 
+bool pick_and_place(moveit::planning_interface::MoveGroupInterface& move_group, const rclcpp::Logger& logger,rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_pub, planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor, const std::string gripper_frame, float distancia, const std::string robot_ip, geometry_msgs::msg::Pose place_pose)
+{
+    auto my_dashboard = std::make_unique<urcl::DashboardClient>(robot_ip);
+    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+    if (!my_dashboard->connect())
+    {
+        return 1;
+    }
+    
+    my_dashboard->commandLoadProgram("external_control.urp");
+    my_dashboard->commandPlay();
+
+    // Para permitir contacto entre objetos
+    planning_scene::PlanningScenePtr planning_scene;
+
+    // float distancia = 0.05; // Distancia de precaucion
+    std::vector<std::string> nombres_objetos = planning_scene_interface.getKnownObjectNames();
+    auto object_poses = planning_scene_interface.getObjectPoses(nombres_objetos);
+    
+    tf2::Quaternion q;
+    q.setRPY(M_PI, 0, M_PI/4);  // rotación de 180° en X, 0° en Y, 45° en Z
+
+    const float D_PLACE = -0.07; // Distancia entre cada posición de place
+    int i = 0;
+    for (const auto& pair : object_poses) {
+        geometry_msgs::msg::Pose pose = pair.second; 
+        RCLCPP_INFO(logger, "Objeto: %s, Pose: [%.2f, %.2f, %.2f]",pair.first.c_str(), pose.position.x, pose.position.y, pose.position.z);
+        float d_prepick = pose.position.z + distancia; //Distancia de la posición prepick, la mitad superior del cilindro y distancia extra
+        pose.position.z += d_prepick; //distancia de precaucion + longitud del gripper
+        RCLCPP_INFO(logger, "Orientation: [%.2f, %.2f, %.2f, %.2f]",q.x(), q.y(), q.z(), q.w());
+        
+        pose.orientation.x = q.x();
+        pose.orientation.y = q.y();
+        pose.orientation.z = q.z();
+        pose.orientation.w = q.w();
+
+        if (!mover(move_group, logger, pose, gripper_frame, "pre_pick")) {
+            return false; //Falló
+        }
+
+        // Abrir gripper
+        gripperControl(my_dashboard, "abrir.urp");
+
+        // // Consigo la escena actual
+        planning_scene_monitor->requestPlanningSceneState();
+        planning_scene = planning_scene_monitor->getPlanningScene();
+
+        // Indico que parte pueden estar en colision
+        planning_scene->getAllowedCollisionMatrixNonConst().setEntry("gripper", pair.first.c_str(), true);
+
+        // Enviar la escena modificada al entorno de planificación
+        moveit_msgs::msg::PlanningScene planning_scene_msg;
+        planning_scene->getPlanningSceneMsg(planning_scene_msg);
+        planning_scene_msg.is_diff = true;
+
+        planning_scene_pub->publish(planning_scene_msg);
+
+        // Planificacion cartesian path para acercarse al objeto
+        // Vector con los puntos de la trayectoria
+        std::vector<geometry_msgs::msg::Pose> waypoints;
+        waypoints.push_back(pose);
+        pose.position.z -= d_prepick/2;
+        waypoints.push_back(pose);
+        pose.position.z -= d_prepick/2;
+        waypoints.push_back(pose);
+
+        if (!moverCart(move_group, logger, waypoints, "pick")) {
+            return false; //Falló
+        }
+
+        RCLCPP_INFO(logger, "Unir objeto al movimiento del robot");
+        // Indicar qué links están en contacto con el objeto para evitar errores por colision
+        std::vector<std::string> touch_links;
+        touch_links.push_back("gripper");
+
+        move_group.attachObject(pair.first.c_str(), gripper_frame, touch_links);
+
+        // Agarrar gripper
+        gripperControl(my_dashboard, "agarrar.urp");
+        
+        // Planificacion cartesian path para alejarse hacia arriba
+        waypoints.clear();
+        waypoints.push_back(pose);
+        pose.position.z += d_prepick/2;
+        waypoints.push_back(pose);
+        pose.position.z += d_prepick/2;
+        waypoints.push_back(pose);
+
+        if (!moverCart(move_group, logger, waypoints, "post-pick")) {
+            return false; //Falló
+        }
+
+        // Definir posición pre-place
+        pose.position.x = place_pose.position.x + D_PLACE*i;
+        pose.position.y = place_pose.position.y;
+        pose.position.z = place_pose.position.z + d_prepick; // z + altura
+        i++;
+
+        if (!mover(move_group, logger, pose, gripper_frame, "pre_place")) {
+            return false; //Falló
+        }
+
+        // Planificacion cartesian path para acercarse al objetivo
+        move_group.setStartStateToCurrentState();
+
+        // Vector con los puntos de la trayectoria
+        waypoints.clear();
+        waypoints.push_back(pose);
+        pose.position.z -= d_prepick/2;
+        waypoints.push_back(pose);
+        pose.position.z -= d_prepick/2;
+        waypoints.push_back(pose);
+
+        if (!moverCart(move_group, logger, waypoints, "place")) {
+            return false; //Falló
+        }
+
+        // Abrir gripper
+        gripperControl(my_dashboard, "abrir.urp");
+
+        // Separar objeto del robot
+        move_group.detachObject(pair.first.c_str());
+
+        // Consigo la escena actual
+        planning_scene_monitor->requestPlanningSceneState();
+        planning_scene = planning_scene_monitor->getPlanningScene();
+
+        // Indico que parte pueden estar en colision
+        planning_scene->getAllowedCollisionMatrixNonConst().setEntry("gripper", pair.first.c_str(), true);
+
+        // Enviar la escena modificada al entorno de planificación
+        // moveit_msgs::msg::PlanningScene planning_scene_msg;
+        planning_scene->getPlanningSceneMsg(planning_scene_msg);
+        planning_scene_msg.is_diff = true;
+
+        planning_scene_pub->publish(planning_scene_msg);
+
+        // Planificacion cartesian path para alejarse del objeto
+        move_group.setStartStateToCurrentState();
+        // Vector con los puntos de la trayectoria
+        waypoints.clear();
+        waypoints.push_back(pose);
+        pose.position.z += d_prepick/2;
+        waypoints.push_back(pose);
+        pose.position.z += d_prepick/2;
+        waypoints.push_back(pose);
+
+        if (!moverCart(move_group, logger, waypoints, "post-place")) {
+            return false; //Falló
+        }
+
+        // Cerrar gripper
+        gripperControl(my_dashboard, "cerrar.urp");
+    }
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     //Inicialización con configuración del robot
@@ -148,32 +305,18 @@ int main(int argc, char** argv)
  
     const std::string robot_ip = "212.128.172.172";  // ip del robot
 
-    auto my_dashboard = std::make_unique<urcl::DashboardClient>(robot_ip);
-    // if (!my_dashboard->connect())
-    // {
-    //     return 1;
-    // }
-    
-    // my_dashboard->commandLoadProgram("external_control.urp");
-    // my_dashboard->commandPlay();
-
     // Crear interface para el grupo de planificación
     auto node = rclcpp::Node::make_shared("celda_move_to_pose", node_options);
     
+    planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(node, "robot_description");
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_pub = node->create_publisher<moveit_msgs::msg::PlanningScene>("/planning_scene", 1);
 
     rclcpp::sleep_for(std::chrono::milliseconds(500));  // Espera a que se conecte el subscriber
     
     static const std::string PLANNING_GROUP = "ur_arm";
-    static const std::string GRIPPER_FRAME = "ur3e_tool0";
+    static const std::string GRIPPER_FRAME = "gripper_tip";
     moveit::planning_interface::MoveGroupInterface move_group(node, PLANNING_GROUP);
-
-    // Para añadir o quitar objetos
-    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-    // Para permitir contacto entre objetos
-    planning_scene::PlanningScenePtr planning_scene;
-    planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(node, "robot_description");
+    move_group.setEndEffectorLink(GRIPPER_FRAME); //Para que computeCartesianPath use el gripper como referencia
 
     // Evitar que se mueva joint_5
     // moveit_msgs::msg::JointConstraint joint5_constraint;
@@ -187,7 +330,6 @@ int main(int argc, char** argv)
     // constraints.joint_constraints.push_back(joint5_constraint);
     // move_group.setPathConstraints(constraints);
 
-
     // Define el cilindro
     shape_msgs::msg::SolidPrimitive primitive;
     primitive.type = shape_msgs::msg::SolidPrimitive::CYLINDER;
@@ -195,151 +337,51 @@ int main(int argc, char** argv)
     primitive.dimensions[0] = 0.025;  // altura en metros
     primitive.dimensions[1] = 0.015; // radio en metros
 
-    int i=0;
-    while(i<10) {
-    // Posicion del cilindro
+    // Posición del cilindro
     geometry_msgs::msg::Pose pose;
-    pose.position.x = 0.4;
+    // pose.position.x = 0.4;
+    // pose.position.y = -0.3;
+    // pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
+    // addObjeto("pick_target1",primitive, pose);
+
+    // pose.position.x = 0.4;
+    // pose.position.y = 0.3;
+    // addObjeto("pick_target2",primitive, pose);
+
+    // pose.position.x = -0.4;
+    // pose.position.y = 0.3;
+    // addObjeto("pick_target3",primitive, pose);
+
+    pose.position.x = -0.4;
     pose.position.y = -0.3;
     pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
-    
-    // Añado el cilindro
-    addObjeto(primitive, pose);
+    addObjeto("pick_target1",primitive, pose);
+
+    pose.position.x = -0.2;
+    pose.position.y = -0.3;
+    addObjeto("pick_target2",primitive, pose);
+
+    pose.position.x = -0.4;
+    pose.position.y = -0.1;
+    addObjeto("pick_target3",primitive, pose);
+
+    pose.position.x = -0.2;
+    pose.position.y = -0.1;
+    addObjeto("pick_target4",primitive, pose);
 
     //Esperamos a que se actualice la escena
     rclcpp::sleep_for(std::chrono::seconds(1));
 
-    // Definir la pose pre-pick
-    float distancia = 0.05; // Distancia de precaucion
-    float d_prepick = primitive.dimensions[0]/2 + distancia; //Distancia de la posicion prepick, la mitad superior del cilindro y distancia extra
-    pose.position.z += d_prepick  + 0.21; //distancia de precaucion + longitud del gripper
-    // pose.orientation.x = 1; //Con orientación hacia abajo
-    // pose.orientation.y = 0;
-    // pose.orientation.z = 0;
-    // pose.orientation.w = 0;
-    tf2::Quaternion q;
-    q.setRPY(M_PI, 0, 0);  // rotación de 180° en X
-    pose.orientation.x = q.x();
-    pose.orientation.y = q.y();
-    pose.orientation.z = q.z();
-    pose.orientation.w = q.w();
-    
-    if (!mover(move_group, node->get_logger(), pose, GRIPPER_FRAME, "pre_pick")) {
-        return 0; //Falló
-    }
-
-    // Abrir gripper
-    gripperControl(my_dashboard, "abrir.urp");
-
-    // // Consigo la escena actual
-    // planning_scene_monitor->requestPlanningSceneState();
-    // planning_scene = planning_scene_monitor->getPlanningScene();
-
-    // // Indico que parte pueden estar en colision
-    // planning_scene->getAllowedCollisionMatrixNonConst().setEntry("gripper", "target_object", true);
-
-    // // Enviar la escena modificada al entorno de planificación
-    // moveit_msgs::msg::PlanningScene planning_scene_msg;
-    // planning_scene->getPlanningSceneMsg(planning_scene_msg);
-    // planning_scene_msg.is_diff = true;
-
-    // planning_scene_pub->publish(planning_scene_msg);
-
-    // Planificacion cartesian path para acercarse al objeto
-    // Vector con los puntos de la trayectoria
-    std::vector<geometry_msgs::msg::Pose> waypoints;
-    waypoints.push_back(pose);
-    pose.position.z -= d_prepick/2;
-    waypoints.push_back(pose);
-    pose.position.z -= d_prepick/2;
-    waypoints.push_back(pose);
-
-    if (!moverCart(move_group, node->get_logger(), waypoints, "pick")) {
-        return 0; //Falló
-    }
-
-    RCLCPP_INFO(node->get_logger(), "Unir objeto al movimiento del robot");
-    // Indicar qué links están en contacto con el objeto para evitar errores por colision
-    std::vector<std::string> touch_links;
-    touch_links.push_back("gripper");
-
-    move_group.attachObject("pick_target", GRIPPER_FRAME, touch_links);
-
-    // Agarrar gripper
-    gripperControl(my_dashboard, "agarrar.urp");
-    
-    // Planificacion cartesian path para alejarse hacia arriba
-    waypoints.clear();
-    waypoints.push_back(pose);
-    pose.position.z += d_prepick/2;
-    waypoints.push_back(pose);
-    pose.position.z += d_prepick/2;
-    waypoints.push_back(pose);
-
-    if (!moverCart(move_group, node->get_logger(), waypoints, "post-pick")) {
-        return 0; //Falló
-    }
-
-    // Definir posición pre-place
-    pose.position.x = 0.0;
-    pose.position.y = -0.3;
-    //Mantenemos la misma posición en altura y orientación hacia abajo
-
-    if (!mover(move_group, node->get_logger(), pose, GRIPPER_FRAME, "pre_place")) {
-        return 0; //Falló
-    }
-    
-    rclcpp::sleep_for(std::chrono::seconds(1));
-
-    // Planificacion cartesian path para acercarse al objetivo
-    move_group.setStartStateToCurrentState();
-
-    // Vector con los puntos de la trayectoria
-    waypoints.clear();
-    waypoints.push_back(pose);
-    pose.position.z -= d_prepick/2;
-    waypoints.push_back(pose);
-    pose.position.z -= d_prepick/2;
-    waypoints.push_back(pose);
-
-    if (!moverCart(move_group, node->get_logger(), waypoints, "place")) {
-        return 0; //Falló
-    }
-
-    // Abrir gripper
-    gripperControl(my_dashboard, "abrir.urp");
-
-    // Separar objeto del robot
-    move_group.detachObject("pick_target");
-
-    RCLCPP_INFO(node->get_logger(), "Eliminar objeto");
-    std::vector<std::string> objetos_eliminar;
-    objetos_eliminar.push_back("pick_target");
-    planning_scene_interface.removeCollisionObjects(objetos_eliminar);
-
-    // Planificacion cartesian path para alejarse del objeto
-    move_group.setStartStateToCurrentState();
-    // Vector con los puntos de la trayectoria
-    waypoints.clear();
-    waypoints.push_back(pose);
-    pose.position.z += d_prepick/2;
-    waypoints.push_back(pose);
-    pose.position.z += d_prepick/2;
-    waypoints.push_back(pose);
-
-    if (!moverCart(move_group, node->get_logger(), waypoints, "post-place")) {
-        return 0; //Falló
-    }
-
-    // Cerrar gripper
-    gripperControl(my_dashboard, "cerrar.urp");
+    geometry_msgs::msg::Pose place_pose;
+    place_pose.position.x = 0.0;
+    place_pose.position.y = -0.3;
+    place_pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
+    pick_and_place(move_group, node->get_logger(), planning_scene_pub, planning_scene_monitor, GRIPPER_FRAME, 0.05, robot_ip, place_pose);
 
     // // RCLCPP_INFO(node->get_logger(), "Eliminar objeto");
     // // std::vector<std::string> objetos_eliminar;
-    // // objetos_eliminar.push_back("pick_target");
+    // // objetos_eliminar.push_back(pair.first.c_str());
     // // planning_scene_interface.removeCollisionObjects(objetos_eliminar);
-    i++;
-    }
 
     // Shutdown ROS
     rclcpp::shutdown();

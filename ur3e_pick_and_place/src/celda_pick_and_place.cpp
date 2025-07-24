@@ -1,3 +1,4 @@
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -7,6 +8,10 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <ur_client_library/ur/dashboard_client.h>
+#include <yaml-cpp/yaml.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_ros/static_transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 // #include <moveit/robot_model_loader/robot_model_loader.h>
@@ -16,13 +21,13 @@
 // #include <trajectory_processing/iterative_parabolic_time_parameterization.h>
 
 //En las funciones pasar directamente node para evitar tantos parámetros?
-void addObjeto(const std::string& id, shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Pose pose)
+void addObjeto(const std::string& id, const std::string& frame_id, shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Pose pose)
 {
   moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
 
   moveit_msgs::msg::CollisionObject objeto;
   objeto.id = id;
-  objeto.header.frame_id = "world";
+  objeto.header.frame_id = frame_id;
 
   // Asigna geometría y pose
   objeto.primitives.push_back(primitive);
@@ -37,12 +42,83 @@ void addObjeto(const std::string& id, shape_msgs::msg::SolidPrimitive primitive,
   planning_scene_interface.applyCollisionObjects(objetos);
 }
 
-void gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std::string& comando) {
-    // return;
-    dashboard->commandLoadProgram(comando);
+bool gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std::string& comando) {
+    // // return true;
+    // int intentos = 0;
+    // while (!dashboard->commandLoadProgram(comando)) {
+    //     rclcpp::sleep_for(std::chrono::milliseconds(250));
+    //     if (intentos >= 10) {
+    //         return false;
+    //     }
+    //     intentos++;
+    // }
+    
+    // intentos = 0;
+    // while (!dashboard->commandPlay()) {
+    //     rclcpp::sleep_for(std::chrono::milliseconds(250));
+    //     if (intentos >= 10) {
+    //         return false;
+    //     }
+    //     intentos++;
+    // }
+    
+    // dashboard->commandPlay();
+
+    // std::string estado;
+    // do
+    // {
+    //     dashboard->commandProgramState(estado);
+    //     rclcpp::sleep_for(std::chrono::milliseconds(100));
+    //     // Espera a que el comando se complete
+    // } while (estado == "PLAYING " + comando || estado == "LOADING " + comando);
+
+    // dashboard->commandLoadProgram("external_control.urp");
+    // dashboard->commandPlay();
+
+    // return true;
+    // Cambiarlo por un for a ver que pasa
+    // Y añadir un logger para ver si se ha cargado el programa
+    // Y añadir tiempo de espera entre intentos
+    int intentos = 0;
+    while (!dashboard->commandLoadProgram(comando)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        if (++intentos >= 10) {
+        RCLCPP_ERROR(rclcpp::get_logger("gripper"), "No pude cargar '%s'", comando.c_str());
+        return false;
+        }
+    }
+
+    // Arranca la ejecución del programa
+    intentos = 0;
+    while (!dashboard->commandPlay()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        if (++intentos >= 10) {
+        RCLCPP_ERROR(rclcpp::get_logger("gripper"), "No pude ejecutar '%s'", comando.c_str());
+        return false;
+        }
+    }
+
+    // Espera a que termine PLAYING o LOADING
+    std::string estado;
+    do {
+        dashboard->commandProgramState(estado);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    } while (estado.rfind("PLAYING", 0) == 0 || estado.rfind("LOADING", 0) == 0);
+
+    // Vuelve al programa de external_control
+    intentos = 0;
+    while (!dashboard->commandLoadProgram("external_control.urp")) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        if (++intentos >= 10) {
+        RCLCPP_ERROR(rclcpp::get_logger("gripper"),
+                    "No pude recargar 'external_control.urp'");
+        return false;
+        }
+    }
     dashboard->commandPlay();
-    dashboard->commandLoadProgram("external_control.urp");
-    dashboard->commandPlay();
+
+    RCLCPP_INFO(rclcpp::get_logger("gripper"), "Gripper '%s' completado.", comando.c_str());
+    return true;
 }
 
 bool mover(moveit::planning_interface::MoveGroupInterface& move_group, const rclcpp::Logger& logger, geometry_msgs::msg::Pose pose, std::string frame, std::string nombreFase) {
@@ -163,6 +239,7 @@ bool pick_and_place(moveit::planning_interface::MoveGroupInterface& move_group, 
 
     const float D_PLACE = -0.07; // Distancia entre cada posición de place
     int i = 0;
+
     for (const auto& pair : object_poses) {
         geometry_msgs::msg::Pose pose = pair.second; 
         RCLCPP_INFO(logger, "Objeto: %s, Pose: [%.2f, %.2f, %.2f]",pair.first.c_str(), pose.position.x, pose.position.y, pose.position.z);
@@ -330,6 +407,48 @@ int main(int argc, char** argv)
     // constraints.joint_constraints.push_back(joint5_constraint);
     // move_group.setPathConstraints(constraints);
 
+    std::string vision_share = ament_index_cpp::get_package_share_directory("vision");
+
+    // Construye la ruta al fichero objetos.yaml
+    std::string objetos_yaml = vision_share + "/objetos.yaml";
+
+    RCLCPP_INFO(node->get_logger(), "Cargando objetos desde: %s", objetos_yaml.c_str());
+
+    // Carga el YAML
+    YAML::Node escena = YAML::LoadFile(objetos_yaml);
+    
+    tf2_ros::StaticTransformBroadcaster broadcaster(node);
+    
+    double aruco_roll = escena["aruco"]["orientacion"]["roll"].as<double>();
+    double aruco_pitch = escena["aruco"]["orientacion"]["pitch"].as<double>();
+    double aruco_yaw = escena["aruco"]["orientacion"]["yaw"].as<double>();
+    RCLCPP_INFO(node->get_logger(), "Orientación del aruco: roll=%.2f, pitch=%.2f, yaw=%.2f", aruco_roll, aruco_pitch, aruco_yaw);
+    double aruco_x = escena["aruco"]["posicion"]["x"].as<double>();
+    double aruco_y = escena["aruco"]["posicion"]["y"].as<double>(); 
+    double aruco_z = escena["aruco"]["posicion"]["z"].as<double>();
+    RCLCPP_INFO(node->get_logger(), "Posición del aruco: x=%.2f, y=%.2f, z=%.2f", aruco_x, aruco_y, aruco_z);
+
+    // 2) Crea el broadcaster de TF2 **una sola vez**
+
+    // 3) Monta el TransformStamped
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp = node->now();
+    t.header.frame_id = "world";          // o el frame padre que uses
+    t.child_frame_id = "aruco";   // el nombre de tu nuevo frame
+
+    // posición
+    t.transform.translation.x = aruco_x;
+    t.transform.translation.y = aruco_y;
+    t.transform.translation.z = aruco_z;
+
+    // convierto RPY → quaternion
+    tf2::Quaternion q;
+    q.setRPY(aruco_roll, aruco_pitch, aruco_yaw);
+    t.transform.rotation = tf2::toMsg(q);
+
+    // 4) Publica el transform **una vez** (es estático)
+    broadcaster.sendTransform(t);
+
     // Define el cilindro
     shape_msgs::msg::SolidPrimitive primitive;
     primitive.type = shape_msgs::msg::SolidPrimitive::CYLINDER;
@@ -339,35 +458,41 @@ int main(int argc, char** argv)
 
     // Posición del cilindro
     geometry_msgs::msg::Pose pose;
+
+    int i = 0;
+    for (auto objeto : escena["objetos"]) {
+        double x = objeto["posicion"]["x"].as<double>();
+        double y = objeto["posicion"]["y"].as<double>();
+        double z = objeto["posicion"]["z"].as<double>();
+
+        pose.position.x = x;
+        pose.position.y = y;
+        pose.position.z = z + primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
+        addObjeto("pick_target" + i, "aruco", primitive, pose);
+        i++;
+    }
+    
+    // pose.position.x = 0.1;
+    // pose.position.y = -0.1;
+    // pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
+    // addObjeto("pick_target1", "aruco", primitive, pose);
+
     // pose.position.x = 0.4;
     // pose.position.y = -0.3;
     // pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
-    // addObjeto("pick_target1",primitive, pose);
+    // addObjeto("pick_target1", primitive, pose);
+
+    // pose.position.x = 0.2;
+    // pose.position.y = -0.3;
+    // addObjeto("pick_target2", primitive, pose);
 
     // pose.position.x = 0.4;
-    // pose.position.y = 0.3;
-    // addObjeto("pick_target2",primitive, pose);
+    // pose.position.y = -0.1;
+    // addObjeto("pick_target3", primitive, pose);
 
-    // pose.position.x = -0.4;
-    // pose.position.y = 0.3;
-    // addObjeto("pick_target3",primitive, pose);
-
-    pose.position.x = -0.4;
-    pose.position.y = -0.3;
-    pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
-    addObjeto("pick_target1",primitive, pose);
-
-    pose.position.x = -0.2;
-    pose.position.y = -0.3;
-    addObjeto("pick_target2",primitive, pose);
-
-    pose.position.x = -0.4;
-    pose.position.y = -0.1;
-    addObjeto("pick_target3",primitive, pose);
-
-    pose.position.x = -0.2;
-    pose.position.y = -0.1;
-    addObjeto("pick_target4",primitive, pose);
+    // pose.position.x = 0.2;
+    // pose.position.y = -0.1;
+    // addObjeto("pick_target4", primitive, pose);
 
     //Esperamos a que se actualice la escena
     rclcpp::sleep_for(std::chrono::seconds(1));

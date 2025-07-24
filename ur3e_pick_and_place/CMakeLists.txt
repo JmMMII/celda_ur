@@ -7,7 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -18,6 +18,9 @@ find_package(ur_client_library REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 find_package(moveit_ros_move_group REQUIRED)
 find_package(srdfdom REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 # uncomment the following section in order to fill in
 # further dependencies manually.
@@ -38,8 +41,15 @@ ament_target_dependencies(celda_pick_and_place
   moveit_ros_planning
   moveit_ros_move_group
   srdfdom
+  ament_index_cpp
+  tf2_geometry_msgs
+  tf2_ros
+  # yaml-cpp
 )
 
+target_link_libraries(celda_pick_and_place
+  yaml-cpp
+)
 
 install(TARGETS celda_pick_and_place
   DESTINATION lib/${PROJECT_NAME})

@@ -72,10 +72,10 @@ bool gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std
     //     // Espera a que el comando se complete
     // } while (estado == "PLAYING " + comando || estado == "LOADING " + comando);
 
-    // dashboard->commandLoadProgram("external_control.urp");
-    // dashboard->commandPlay();
-
     // return true;
+
+
+
     // Cambiarlo por un for a ver que pasa
     // Y añadir un logger para ver si se ha cargado el programa
     // Y añadir tiempo de espera entre intentos
@@ -119,6 +119,38 @@ bool gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std
 
     RCLCPP_INFO(rclcpp::get_logger("gripper"), "Gripper '%s' completado.", comando.c_str());
     return true;
+
+    // 2) Carga tu programa de gripper (.urp) y espera a que quede STOPPED
+    // std::string cmd_load = "load " + comando;
+    // std::string respuesta = "Loading program: /programs/"+ comando +", /programs/default.installation";
+    // if (!dashboard->waitForReply(
+    //         cmd_load,
+    //         respuesta,
+    //         std::chrono::seconds(10)))
+    // {
+    //     RCLCPP_ERROR(rclcpp::get_logger("gripper"),
+    //                 "No pudo cargar '%s'", comando.c_str());
+    //     return false;
+    // }
+
+    // // 3) Arranca la ejecución y espera a que PLAY termine
+    // if (!dashboard->waitForReply(
+    //         "play",
+    //         "Starting program",
+    //         std::chrono::seconds(2)))
+    // {
+    //     RCLCPP_ERROR(rclcpp::get_logger("gripper"),
+    //                 "No pudo ejecutar '%s'", comando.c_str());
+    //     return false;
+    // }
+
+    // dashboard->commandLoadProgram("external_control.urp");
+    // dashboard->commandPlay();
+
+    // RCLCPP_INFO(rclcpp::get_logger("gripper"),
+    //             "Gripper '%s' completado.", comando.c_str());
+    // return true;
+
 }
 
 bool mover(moveit::planning_interface::MoveGroupInterface& move_group, const rclcpp::Logger& logger, geometry_msgs::msg::Pose pose, std::string frame, std::string nombreFase) {

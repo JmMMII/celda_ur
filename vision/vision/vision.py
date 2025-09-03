@@ -16,7 +16,7 @@ with np.load(calib_path) as data:
     camera_matrix = data["camera_matrix"]
     dist_coeffs = data["dist_coeffs"]
 
-def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float, arucoYaw : float, arucoPitch : float, arucoRoll : float, output : str):
+def describirEscena(arucoX : float, arucoY : float, arucoZ : float, arucoYaw : float, arucoPitch : float, arucoRoll : float, output : str):
     # Tamaño del marcador (metros)
     longitudMarcador = 0.05
 
@@ -30,40 +30,33 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
 
     # Cargar el modelo
     model = YOLO(modelo_path)
-    # image_path = "Vision.v1i.yolov8/test/images/WIN_20250717_12_28_09_Pro_jpg.rf.9edbf5a4af5e7fb3dbb027d9c79ff507.jpg"
-    # image_path = "Vision.v1i.yolov8/test/images/WIN_20250717_12_32_40_Pro_jpg.rf.ce0658ec63c1e11d0c2193ecf5ccc191.jpg"
-    # image_path = "Vision.v1i.yolov8/test/images/WIN_20250717_12_39_42_Pro_jpg.rf.c66a58d1b14e9b30f7d1136c07a42817.jpg"
 
     # Capturar imagen desde la cámara
-    # cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(0)
 
-    # if not cap.isOpened():
-    #     raise RuntimeError("No se pudo abrir la cámara.")
+    if not cap.isOpened():
+        raise RuntimeError("No se pudo abrir la cámara.")
 
-    # print("Pulsa 'r' para capturar la imagen.")
+    print("Pulsa 's' para capturar la imagen.")
 
-    # while True:
-    #     ret, frame = cap.read()
-    #     if not ret:
-    #         raise RuntimeError("Error al capturar el frame de la cámara.")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            raise RuntimeError("Error al capturar el frame de la cámara.")
         
-    #     # Mostrar el frame en una ventana
-    #     cv2.imshow("Cámara", frame)
+        # Mostrar el frame en una ventana
+        cv2.imshow("Cámara", frame)
 
-    #     # Esperar a que el usuario pulse una tecla
-    #     key = cv2.waitKey(1) & 0xFF
+        # Esperar a que el usuario pulse una tecla
+        key = cv2.waitKey(1) & 0xFF
 
-    #     if key == ord('r'):
-    #         print("Imagen capturada.")
-    #         cap.release()
-    #         cv2.destroyAllWindows()
-    #         img = frame  # Devuelve la imagen capturada
+        if key == ord('s'):
+            print("Imagen capturada.")
+            cap.release()
+            cv2.destroyAllWindows()
+            img = frame  # Devuelve la imagen capturada
+            break
     
-    if not cv2.os.path.exists(input):
-        raise FileNotFoundError(f"La imagen {input} no existe.")
-    
-    img = cv2.imread(input)
-
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # Para hacer la detección más robusta
 
     # Cargar diccionario ArUco
@@ -86,10 +79,6 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
     if retval:
         cv2.drawFrameAxes(img, camera_matrix, dist_coeffs, rvec, tvec, longitudMarcador / 2)
 
-    # 3) Define las coordenadas reales de esas esquinas en el plano del marcador
-
-    # Fíjate que el origen (0,0) es el centro del ArUco,
-    # y X+ va hacia la derecha, Y+ hacia arriba
     world = np.array([
         [-longitudMarcador / 2, longitudMarcador / 2],  # esquina superior-izq
         [longitudMarcador / 2, longitudMarcador / 2],  # esquina superior-der
@@ -97,15 +86,10 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
         [-longitudMarcador / 2, -longitudMarcador / 2],  # esquina inferior-izq
     ], dtype=np.float32)
 
-    # 4) Calcula la homografía que lleva píxeles → metros
-    #    getPerspectiveTransform espera src=imagen, dst=mundo
     H = cv2.getPerspectiveTransform(corner, world)
 
-    # Run batched inference on a list of images
-    result = model(input)  # return a list of Results objects
+    result = model(img)
     result = result[0]
-
-    # print(result.boxes.xywh)
 
     # Preparo la escritura del fichero .yaml
     arucoInfo = {
@@ -129,7 +113,7 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
         cv2.putText(img, f"{class_name} {confidence:.2f}", (x_center + 10, y_center - 10),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         print(f"Objeto {i}: {class_name} | Confianza: {confidence:.2f} | Centroide: ({x_center}, {y_center})")
 
-        # 6) Transfórmalo con cv2.perspectiveTransform
+        # Transfórmalo con cv2.perspectiveTransform
         pt_px = np.array([[[x_center, y_center]]], dtype=np.float32)  # shape (1,1,2)
         pt_m = cv2.perspectiveTransform(pt_px, H)[0, 0]  # shape (2,)
 
@@ -153,7 +137,7 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
     if ids is not None:
         src_pts = corners[0].reshape(4, 2).astype(np.float32)
 
-        # 2) Define el tamaño de salida en píxeles
+        # Define el tamaño de salida en píxeles
         out_size = 640
         dst_pts = np.array([
             [0, 0],  # esquina sup‑izq
@@ -162,7 +146,7 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
             [0, out_size - 1]  # inf‑izq
         ], dtype=np.float32)
 
-        # 3) Homografía píxel→píxel
+        # Homografía píxel→píxel
         H_img = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
         h, w = img.shape[:2]
@@ -195,7 +179,6 @@ def describirEscena(input : str, arucoX : float, arucoY : float, arucoZ : float,
 
 def main():
     parser = argparse.ArgumentParser(description="Generar YAML con ArUco y objetos.")
-    parser.add_argument("--input", type=str, required=True, help="Ruta de la imagen de entrada")
     parser.add_argument("--x", type=float, default=0.445, help="Posición X del ArUco")
     parser.add_argument("--y", type=float, default=-0.345, help="Posición Y del ArUco")
     parser.add_argument("--z", type=float, default=0.0, help="Posición Z del ArUco")
@@ -205,7 +188,7 @@ def main():
     parser.add_argument("--output", type=str, default=os.path.join(share_dir, 'objetos.yaml'), help="Nombre del archivo de salida")
 
     args = parser.parse_args()
-    describirEscena(args.input, args.x, args.y, args.z, args.yaw, args.pitch, args.roll, args.output)
+    describirEscena(args.x, args.y, args.z, args.yaw, args.pitch, args.roll, args.output)
 
 if __name__ == "__main__":
     main()

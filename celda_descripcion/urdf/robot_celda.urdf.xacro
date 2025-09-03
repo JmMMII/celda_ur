@@ -10,7 +10,6 @@
   <xacro:arg name="visual_parameters_file" default="$(find celda_control)/config/$(arg ur_type)/visual_parameters.yaml"/>
 
   <link name="world"/>
-  <!--This will create the scene where the robot is located in-->
   <xacro:robot_celda
     parent="world"
     ur_type="$(arg ur_type)"
@@ -23,3 +22,4 @@
   </xacro:robot_celda>
 
 </robot>
+

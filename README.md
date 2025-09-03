@@ -1,3 +1,5 @@
+Para el uso de estos paquetes se deben colocar el la carpeta src de un worspace de ROS2 y construirlo con colcon build
+
 1. **Run simulation (fake hardware):**
    ```bash
    ros2 launch celda_control iniciar_robot.launch.py use_fake_hardware:=true launch_rviz:=false

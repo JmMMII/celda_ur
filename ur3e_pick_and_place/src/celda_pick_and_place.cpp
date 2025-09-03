@@ -14,11 +14,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
-// #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <moveit/planning_scene/planning_scene.h>
-// #include <moveit_msgs/msg/planning_scene.hpp>
 #include <moveit/robot_state/robot_state.h>
-// #include <trajectory_processing/iterative_parabolic_time_parameterization.h>
 
 //En las funciones pasar directamente node para evitar tantos parámetros?
 void addObjeto(const std::string& id, const std::string& frame_id, shape_msgs::msg::SolidPrimitive primitive, geometry_msgs::msg::Pose pose)
@@ -43,42 +40,6 @@ void addObjeto(const std::string& id, const std::string& frame_id, shape_msgs::m
 }
 
 bool gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std::string& comando) {
-    // // return true;
-    // int intentos = 0;
-    // while (!dashboard->commandLoadProgram(comando)) {
-    //     rclcpp::sleep_for(std::chrono::milliseconds(250));
-    //     if (intentos >= 10) {
-    //         return false;
-    //     }
-    //     intentos++;
-    // }
-    
-    // intentos = 0;
-    // while (!dashboard->commandPlay()) {
-    //     rclcpp::sleep_for(std::chrono::milliseconds(250));
-    //     if (intentos >= 10) {
-    //         return false;
-    //     }
-    //     intentos++;
-    // }
-    
-    // dashboard->commandPlay();
-
-    // std::string estado;
-    // do
-    // {
-    //     dashboard->commandProgramState(estado);
-    //     rclcpp::sleep_for(std::chrono::milliseconds(100));
-    //     // Espera a que el comando se complete
-    // } while (estado == "PLAYING " + comando || estado == "LOADING " + comando);
-
-    // return true;
-
-
-
-    // Cambiarlo por un for a ver que pasa
-    // Y añadir un logger para ver si se ha cargado el programa
-    // Y añadir tiempo de espera entre intentos
     int intentos = 0;
     while (!dashboard->commandLoadProgram(comando)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -119,37 +80,6 @@ bool gripperControl(std::unique_ptr<urcl::DashboardClient>& dashboard, const std
 
     RCLCPP_INFO(rclcpp::get_logger("gripper"), "Gripper '%s' completado.", comando.c_str());
     return true;
-
-    // 2) Carga tu programa de gripper (.urp) y espera a que quede STOPPED
-    // std::string cmd_load = "load " + comando;
-    // std::string respuesta = "Loading program: /programs/"+ comando +", /programs/default.installation";
-    // if (!dashboard->waitForReply(
-    //         cmd_load,
-    //         respuesta,
-    //         std::chrono::seconds(10)))
-    // {
-    //     RCLCPP_ERROR(rclcpp::get_logger("gripper"),
-    //                 "No pudo cargar '%s'", comando.c_str());
-    //     return false;
-    // }
-
-    // // 3) Arranca la ejecución y espera a que PLAY termine
-    // if (!dashboard->waitForReply(
-    //         "play",
-    //         "Starting program",
-    //         std::chrono::seconds(2)))
-    // {
-    //     RCLCPP_ERROR(rclcpp::get_logger("gripper"),
-    //                 "No pudo ejecutar '%s'", comando.c_str());
-    //     return false;
-    // }
-
-    // dashboard->commandLoadProgram("external_control.urp");
-    // dashboard->commandPlay();
-
-    // RCLCPP_INFO(rclcpp::get_logger("gripper"),
-    //             "Gripper '%s' completado.", comando.c_str());
-    // return true;
 
 }
 
@@ -427,18 +357,6 @@ int main(int argc, char** argv)
     moveit::planning_interface::MoveGroupInterface move_group(node, PLANNING_GROUP);
     move_group.setEndEffectorLink(GRIPPER_FRAME); //Para que computeCartesianPath use el gripper como referencia
 
-    // Evitar que se mueva joint_5
-    // moveit_msgs::msg::JointConstraint joint5_constraint;
-    // joint5_constraint.joint_name = "ur3e_wrist_3_joint";
-    // joint5_constraint.position = move_group.getCurrentJointValues()[5];  // valor actual
-    // joint5_constraint.tolerance_above = 0.01;
-    // joint5_constraint.tolerance_below = 0.01;
-    // joint5_constraint.weight = 1.0;
-
-    // moveit_msgs::msg::Constraints constraints;
-    // constraints.joint_constraints.push_back(joint5_constraint);
-    // move_group.setPathConstraints(constraints);
-
     std::string vision_share = ament_index_cpp::get_package_share_directory("vision");
 
     // Construye la ruta al fichero objetos.yaml
@@ -460,9 +378,6 @@ int main(int argc, char** argv)
     double aruco_z = escena["aruco"]["posicion"]["z"].as<double>();
     RCLCPP_INFO(node->get_logger(), "Posición del aruco: x=%.2f, y=%.2f, z=%.2f", aruco_x, aruco_y, aruco_z);
 
-    // 2) Crea el broadcaster de TF2 **una sola vez**
-
-    // 3) Monta el TransformStamped
     geometry_msgs::msg::TransformStamped t;
     t.header.stamp = node->now();
     t.header.frame_id = "world";          // o el frame padre que uses
@@ -478,7 +393,6 @@ int main(int argc, char** argv)
     q.setRPY(aruco_roll, aruco_pitch, aruco_yaw);
     t.transform.rotation = tf2::toMsg(q);
 
-    // 4) Publica el transform **una vez** (es estático)
     broadcaster.sendTransform(t);
 
     // Define el cilindro
@@ -503,28 +417,6 @@ int main(int argc, char** argv)
         addObjeto("pick_target" + i, "aruco", primitive, pose);
         i++;
     }
-    
-    // pose.position.x = 0.1;
-    // pose.position.y = -0.1;
-    // pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
-    // addObjeto("pick_target1", "aruco", primitive, pose);
-
-    // pose.position.x = 0.4;
-    // pose.position.y = -0.3;
-    // pose.position.z = primitive.dimensions[0]/2;  // z + altura/2 para que se apoye sobre la superficie
-    // addObjeto("pick_target1", primitive, pose);
-
-    // pose.position.x = 0.2;
-    // pose.position.y = -0.3;
-    // addObjeto("pick_target2", primitive, pose);
-
-    // pose.position.x = 0.4;
-    // pose.position.y = -0.1;
-    // addObjeto("pick_target3", primitive, pose);
-
-    // pose.position.x = 0.2;
-    // pose.position.y = -0.1;
-    // addObjeto("pick_target4", primitive, pose);
 
     //Esperamos a que se actualice la escena
     rclcpp::sleep_for(std::chrono::seconds(1));
@@ -546,3 +438,4 @@ int main(int argc, char** argv)
     // my_dashboard->disconnect();
     return 0;
 }
+
